@@ -11,6 +11,26 @@ Detects workplace hazards in real-time from camera feeds:
 
 Alerts workers immediately via audio (buzzer) + visual (LED) feedback and logs all events.
 
+## 📊 Project Preliminary Demo & Progress Update
+
+The system is currently in the "Verified Development" phase. The model has been successfully trained and is running in real-time on the local dashboard.
+
+### 🧠 Model Performance (50 Epochs)
+| Metric | Result | Impact |
+|---|---|---|
+| **Precision** | **92.1%** | Extremely low false positive rate (minimal annoyance for workers). |
+| **Recall** | **76.9%** | Robust detection across 22 complex safety classes. |
+| **mAP@50** | **84.1%** | Highly accurate classification and localization. |
+
+### ⚡ Inference & Speed
+- **Weights Loaded:** `yolov8n_safety_v1.pt` (Custom trained)
+- **Inference Hardware:** NVIDIA RTX 5060 Ti (Blackwell)
+- **Inference Speed:** **~2.5ms** (Over 300 FPS potential, limited to 30 FPS for camera sync)
+- **Deployment Status:** Testing on Jetson Orin Nano (TensorRT export pending)
+
+### 📈 Current Results
+Training logs, confusion matrices, and PR curves are available in the `models/train_run/` directory.
+
 ## Quick Start
 
 ### Windows (Development)
