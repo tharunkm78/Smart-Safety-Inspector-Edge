@@ -1,0 +1,35 @@
+# Core ML
+ultralytics>=8.2.0
+torch>=2.0.0
+torchvision>=0.15.0
+tensorrt>=8.6.0              # CPU fallback included in torch; Jetson gets full TRT
+
+# Data handling
+opencv-python>=4.9.0
+numpy>=1.24.0
+Pillow>=10.0.0
+requests>=2.31.0
+scikit-learn>=1.4.0          # for dataset balancing / class weights
+scikit-image>=0.22.0         # for augmentation helpers
+
+# API backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+websockets>=12.0
+pydantic>=2.6.0
+
+# Alerting / audio
+pygame>=2.5.0                # cross-platform audio on Jetson/Linux
+winsound>=0.1                # built-in on Windows
+
+# Hardware / GPIO
+JTOP>=4.0.0                   # Jetson stats (optional, for status monitoring)
+RPi.GPIO>=0.7.0               # for GPIO access on Jetson
+
+# Database
+sqlite3                      # stdlib
+
+# Utilities
+tqdm>=4.66.0
+PyYAML>=6.0.1

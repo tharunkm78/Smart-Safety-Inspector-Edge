@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# AI Models
+models/train_run/
+models/*.pt
+models/*.engine
+models/*.torchscript
+!models/yolov8n_safety_v1.pt
+
+# Datasets (Too large for GitHub)
+data/raw/
+data/combined/
+data/*.zip
+
+# Logs & OS
+logs/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,51 @@
+=== SMART SAFETY INSPECTOR: FULL SETUP & TRAINING GUIDE ===
+
+This guide explains how to set up the environment and train the AI 
+on a Windows machine with an RTX 50-series (Blackwell) GPU.
+
+--- STEP 1: ENVIRONMENT SETUP ---
+1. Install Python 3.12 (UNCHECK "Add to PATH" to avoid conflicts).
+2. Open PowerShell in the project folder.
+3. Create a clean virtual environment:
+   C:\Users\tk896\AppData\Local\Programs\Python\Python312\python.exe -m venv venv
+4. Activate the environment:
+   .\venv\Scripts\Activate.ps1
+
+--- STEP 2: INSTALLING THE "ENGINE" (PyTorch) ---
+To use your RTX 5060 Ti, you need the latest CUDA drivers and libraries:
+1. Install GPU-enabled PyTorch:
+   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+2. Install speed optimizations:
+   pip install torchao
+3. Verify the GPU is ready:
+   python -c "import torch; print('Ready:', torch.cuda.is_available())"
+
+--- STEP 3: INSTALLING PROJECT TOOLS ---
+Install the rest of the project dependencies:
+1. pip install -r requirements.windows.txt
+2. pip install ultralytics
+
+--- STEP 4: DATA PREPARATION ---
+Before training, we must merge and balance the safety datasets:
+1. Run the balancing script:
+   python -m src.data.balance_dataset
+2. (Optional) Check the stats:
+   python -m src.data.dataset_stats
+
+--- STEP 5: TRAINING THE AI ---
+Now, start the training. This builds the "brain" of the system:
+1. Start training (50 epochs recommended for good accuracy):
+   python -m src.training.train_yolov8 --epochs 50
+2. Your model will be saved at: models/train_run/weights/best.pt
+
+--- STEP 6: VIEWING THE RESULTS ---
+1. Start the API & Dashboard:
+   python -m src.api.main
+2. Open your browser to: http://localhost:8000
+
+--- STEP 7: JETSON DEPLOYMENT ---
+1. Copy 'best.pt' to your Jetson Orin Nano.
+2. Export it to TensorRT format on the Jetson:
+   python -m src.training.export_tensorrt
+3. Run the full system on the Jetson:
+   ./scripts/run_full_system.sh

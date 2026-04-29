@@ -1,0 +1,28 @@
+# Windows development — pip install -r requirements.windows.txt
+# Using FastAPI to match src/api/main.py implementation
+
+# Core ML (CPU/GPU as available)
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.2.0
+
+# Data handling
+opencv-python>=4.9.0
+numpy>=1.24.0
+Pillow>=10.0.0
+requests>=2.31.0
+scikit-learn>=1.4.0
+scikit-image>=0.22.0
+
+# API backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+websockets>=12.0
+pydantic>=2.6.0
+
+# Utilities
+tqdm>=4.66.0
+PyYAML>=6.0.1
+psutil>=5.9.0
+pytest>=8.0.0
