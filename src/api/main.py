@@ -1,127 +1,120 @@
-"""FastAPI main application.
-
-Usage:
-    # Jetson / Linux
-    uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
-
-    # Windows dev
-    python -m src.api.main
-"""
-
-import sys
+import asyncio
+import cv2
+import json
+import time
+import argparse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from inference.detector import YoloDetector
+from config import PROJECT_ROOT, COMBINED_DATA_DIR
 
-from fastapi import FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+app = FastAPI()
 
-from src.api.routes import detect, alerts, status
-from src.api.websocket_manager import WSManager
-from src.api.pipeline import run_pipeline
-from src.config import API_CORS_ORIGINS, UI_DIR
+# Global state for sharing the latest detections between threads/tasks
+latest_detections = []
+latest_fps = 0.0
+current_width = 640
+current_height = 480
+latest_frame_id = 0
 
-app = FastAPI(
-    title="Smart Safety Inspector API",
-    version="1.0.0",
-    description="Real-time safety hazard detection API for wearable AI systems",
-)
+# Parse CLI Arguments
+parser = argparse.ArgumentParser(description="Smart Safety Inspector API")
+parser.add_argument("--mode", type=str, default="test", choices=["test", "camera"], help="Run mode: test or camera")
+parser.add_argument("--source", type=int, default=0, help="Camera index for camera mode")
+args = parser.parse_args()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=API_CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Initialize the detector based on mode
+if args.mode == "camera":
+    detector = YoloDetector(mode="camera", source=args.source)
+else:
+    test_images_path = COMBINED_DATA_DIR / "images" / "test"
+    detector = YoloDetector(mode="test", source=str(test_images_path))
 
-ws_manager = WSManager()
-app.state.ws = ws_manager
+def generate_frames():
+    global latest_detections, latest_fps, current_width, current_height, latest_frame_id
+    
+    last_update_time = 0
+    last_time = time.time()
+    frames_count = 0
+    current_frame = None
+    current_detections = []
+    
+    while True:
+        # Update image based on mode
+        if args.mode == "test":
+            if time.time() - last_update_time >= 10 or current_frame is None:
+                current_frame, current_detections = detector.get_frame_and_detections()
+                if current_frame is not None:
+                    current_height, current_width = current_frame.shape[:2]
+                    latest_frame_id += 1
+                last_update_time = time.time()
+        else:
+            # Real-time Camera Mode
+            current_frame, current_detections = detector.get_frame_and_detections()
+            if current_frame is not None:
+                current_height, current_width = current_frame.shape[:2]
+                latest_frame_id += 1
 
-# Shared Camera instance
-_camera = None
+        if current_frame is None:
+            time.sleep(0.1)
+            continue
+            
+        latest_detections = current_detections
+        
+        # Calculate FPS (simulated for static stream)
+        frames_count += 1
+        current_time = time.time()
+        if current_time - last_time >= 1.0:
+            latest_fps = frames_count / (current_time - last_time)
+            frames_count = 0
+            last_time = current_time
 
-def get_camera():
-    global _camera
-    if _camera is None:
-        from src.inference.camera import Camera
-        _camera = Camera(camera_idx=0)
-    return _camera
-
-@app.on_event("startup")
-async def startup_event():
-    import asyncio
-    print("--- SERVER STARTING ---")
-    try:
-        cam = get_camera()
-        print(f"--- CAMERA INITIALIZED ---")
-        asyncio.create_task(run_pipeline(ws_manager, cam))
-    except Exception as e:
-        print(f"!!! CRITICAL STARTUP ERROR !!!: {e}")
+        # Encode frame as JPEG
+        ret, buffer = cv2.imencode('.jpg', current_frame)
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        
+        # Small sleep to prevent 100% CPU usage on the stream loop
+        time.sleep(0.05)
 
 @app.get("/api/video_feed")
 async def video_feed():
-    """MJPEG streaming endpoint."""
-    import cv2
-    import time
-    cam = get_camera()
-    if not cam._running:
-        cam.start()
-
-    def generate():
-        while True:
-            frame = cam.read()
-            if frame is not None:
-                ret, buffer = cv2.imencode('.jpg', frame)
-                if ret:
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-            time.sleep(0.04)  # ~25 FPS
-
-    return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-app.include_router(detect.router, prefix="/api", tags=["Detection"])
-app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
-app.include_router(status.router, prefix="/api", tags=["Status"])
-
+    return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 @app.websocket("/ws/live")
-async def websocket_live(websocket: WebSocket):
-    client_host = websocket.client.host
-    print(f"--- WS CONNECTING ---: From {client_host}")
-    await ws_manager.connect(websocket)
-    print(f"--- WS CONNECTED ---: {client_host}")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
     try:
         while True:
-            data = await websocket.receive_text()
-            if data == "ping":
-                await websocket.send_text("pong")
-    except Exception:
-        pass
-    finally:
-        ws_manager.disconnect(websocket)
+            # Send detections at 10Hz (100ms) to balance real-time tracking with UI stability
+            data = {
+                "type": "detections",
+                "detections": latest_detections,
+                "fps": latest_fps,
+                "width": current_width,
+                "height": current_height,
+                "frame_id": latest_frame_id
+            }
+            await websocket.send_text(json.dumps(data))
+            await asyncio.sleep(0.1)
+    except WebSocketDisconnect:
+        print("Client disconnected")
 
-if UI_DIR.exists():
-    # Mount assets folders
-    if (UI_DIR / "css").exists():
-        app.mount("/css", StaticFiles(directory=str(UI_DIR / "css")), name="css")
-    if (UI_DIR / "js").exists():
-        app.mount("/js", StaticFiles(directory=str(UI_DIR / "js")), name="js")
-
-    @app.get("/")
-    async def root():
-        ui_index = UI_DIR / "index.html"
-        if ui_index.exists():
-            return FileResponse(str(ui_index))
-        return {"message": "Smart Safety Inspector API", "ui": "missing index.html"}
-else:
-    @app.get("/")
-    async def root():
-        return {"message": "Smart Safety Inspector API", "version": "1.0.0"}
-
+# Serve the UI static files
+ui_path = PROJECT_ROOT / "ui"
+app.mount("/", StaticFiles(directory=str(ui_path), html=True), name="ui")
 
 if __name__ == "__main__":
     import uvicorn
+    print("Starting Smart Safety Inspector API Server...")
+    print("Dashboard available at: http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

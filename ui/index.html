@@ -1,102 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Safety Inspector</title>
-    <link rel="stylesheet" href="css/dashboard.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Safety Inspector — Tactical HUD</title>
+  <meta name="description" content="Real-time safety hazard detection tactical surveillance dashboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-    <header class="header">
-        <div class="header-left">
-            <div class="logo">
-                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-                    <circle cx="16" cy="16" r="14" stroke="#00d4ff" stroke-width="2"/>
-                    <path d="M16 8v10M16 22v2" stroke="#00d4ff" stroke-width="2.5" stroke-linecap="round"/>
-                </svg>
-            </div>
-            <div>
-                <h1 class="app-title">Smart Safety Inspector</h1>
-                <p class="app-subtitle">AI-Powered Workplace Hazard Detection</p>
-            </div>
+  <div class="hud-root">
+
+    <!-- ═══════════════════ HEADER ═══════════════════ -->
+    <header class="hud-header">
+      <div class="header-left">
+        <div class="logo">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="12,2 22,8 22,16 12,22 2,16 2,8" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          </svg>
+          <span class="logo-text">SMART SAFETY INSPECTOR</span>
         </div>
-        <div class="header-right">
-            <div class="status-indicator" id="systemStatus">
-                <span class="status-dot" id="statusDot"></span>
-                <span id="statusText">Connecting...</span>
-            </div>
-            <div class="fps-display">
-                <span class="fps-label">FPS</span>
-                <span class="fps-value" id="fpsValue">--</span>
-            </div>
+        <div class="header-subtitle">TACTICAL SURVEILLANCE SYSTEM v2.0</div>
+      </div>
+      <div class="header-center">
+        <div class="live-clock" id="liveClock">--:--:--</div>
+        <div class="live-date" id="liveDate">--- --, ----</div>
+      </div>
+      <div class="header-right">
+        <div class="sys-status" id="systemStatus">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusLabel">SYSTEM ONLINE</span>
         </div>
+        <div class="header-metrics">
+          <span class="hmetric" id="headerFps">-- FPS</span>
+          <span class="hmetric-sep">|</span>
+          <span class="hmetric" id="headerDetections">0 DETECTED</span>
+        </div>
+      </div>
     </header>
 
-    <main class="main-content">
-        <section class="camera-panel">
-            <div class="panel-header">
-                <h2>Live Camera Feed</h2>
-                <select id="cameraSelect" class="camera-select">
-                    <option value="0">Camera 0</option>
-                </select>
-            </div>
-            <div class="camera-feed-container">
-                <img id="cameraFeed" src="/api/video_feed" alt="Camera feed" class="camera-feed" crossorigin="anonymous">
-                <canvas id="overlayCanvas" class="overlay-canvas"></canvas>
-                <div class="priority-banner" id="priorityBanner">
-                    <span id="priorityText">OK</span>
-                </div>
-            </div>
-            <div class="detection-stats" id="detectionStats">
-                <div class="stat-card">
-                    <span class="stat-label">CRITICAL</span>
-                    <span class="stat-value critical" id="criticalCount">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-label">HIGH</span>
-                    <span class="stat-value high" id="highCount">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-label">MEDIUM</span>
-                    <span class="stat-value medium" id="mediumCount">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-label">LOW</span>
-                    <span class="stat-value low" id="lowCount">0</span>
-                </div>
-            </div>
-        </section>
+    <!-- ═══════════════════ MAIN ═══════════════════ -->
+    <main class="hud-main">
 
-        <aside class="right-panel">
-            <div class="panel alerts-panel">
-                <div class="panel-header">
-                    <h2>Alert Feed</h2>
-                    <button class="btn-icon" id="clearAlertsBtn" title="Clear alerts">&#x2715;</button>
-                </div>
-                <div class="alert-list" id="alertList">
-                    <div class="empty-state">No alerts detected</div>
-                </div>
-            </div>
+      <!-- CAMERA SECTION -->
+      <section class="feed-section">
+        <!-- Camera grid — cards injected dynamically by app.js -->
+        <div class="feed-grid" id="feedGrid"></div>
+        <!-- Mission alert popups rendered here -->
+        <div class="alert-overlay" id="alertOverlay" aria-live="assertive"></div>
+      </section>
 
-            <div class="panel chart-panel">
-                <div class="panel-header">
-                    <h2>Alert History (24h)</h2>
-                </div>
-                <canvas id="alertChart"></canvas>
+      <!-- SIDE PANEL -->
+      <aside class="side-panel">
+
+        <!-- THREAT ASSESSMENT -->
+        <div class="panel threat-panel">
+          <div class="panel-header">
+            <span class="panel-title">THREAT ASSESSMENT</span>
+            <span class="panel-badge" id="threatCount">0</span>
+          </div>
+          <div class="panel-body">
+            <div class="risk-section">
+              <div class="risk-label risk-critical">● CRITICAL</div>
+              <div class="risk-items" id="criticalItems">
+                <div class="risk-empty">No active threats</div>
+              </div>
             </div>
-        </aside>
+            <div class="risk-section">
+              <div class="risk-label risk-medium">◆ MEDIUM</div>
+              <div class="risk-items" id="mediumItems">
+                <div class="risk-empty">No warnings</div>
+              </div>
+            </div>
+            <div class="risk-section">
+              <div class="risk-label risk-low">▪ LOW / CLEAR</div>
+              <div class="risk-items" id="lowItems">
+                <div class="risk-empty">No detections</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RADAR -->
+        <div class="panel radar-panel">
+          <div class="panel-header">
+            <span class="panel-title">ZONE RADAR</span>
+            <span class="radar-zone-label" id="radarZone">ZONE-A</span>
+          </div>
+          <div class="panel-body radar-body">
+            <canvas id="radarCanvas" width="240" height="240"></canvas>
+            <div class="radar-meta">
+              <span id="radarSigs">0 signatures</span>
+              <span class="radar-sep">|</span>
+              <span id="radarSweep">SCANNING</span>
+            </div>
+          </div>
+        </div>
+
+      </aside>
     </main>
 
-    <div class="toast-container" id="toastContainer"></div>
-
-    <footer class="footer">
-        <span id="modelInfo">Model: not loaded</span>
-        <span id="connectionInfo">WebSocket: disconnected</span>
+    <!-- ═══════════════════ FOOTER ═══════════════════ -->
+    <footer class="hud-footer">
+      <div class="footer-left">
+        <span class="footer-item">
+          <span class="status-dot small" id="feedStatusDot"></span>
+          <span id="feedStatusLabel">FEED-01: ACTIVE</span>
+        </span>
+      </div>
+      <div class="footer-center">
+        <span id="footerMission">◈ MISSION: ROUTINE SURVEILLANCE</span>
+      </div>
+      <div class="footer-right">
+        <span class="footer-item">ALERTS TODAY: <strong id="totalAlerts">0</strong></span>
+        <span class="footer-sep">|</span>
+        <span class="footer-item" id="footerUptime">UPTIME: 00:00:00</span>
+      </div>
     </footer>
 
-    <script src="js/chart.js"></script>
-    <script src="js/app.js?v=2"></script>
+  </div><!-- /.hud-root -->
+
+  <script src="js/mock-data.js?v=12"></script>
+  <script src="js/radar.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>

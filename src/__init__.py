@@ -1,1 +1,1 @@
-"""Smart Safety Inspector."""
+# Source package

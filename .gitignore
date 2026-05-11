@@ -5,19 +5,19 @@ __pycache__/
 venv/
 .env
 
-# AI Models
-models/train_run/
-models/*.pt
-models/*.engine
-models/*.torchscript
-!models/yolov8n_safety_v1.pt
+# AI Models (Weights are large, keep only the best production weights)
+models/
+*.pt
+*.engine
+*.torchscript
+!data/combined/models/best.pt
 
-# Datasets (Too large for GitHub)
-data/raw/
-data/combined/
-data/*.zip
+# Folders to Exclude (Per User Request)
+data/
+backup/
 
 # Logs & OS
 logs/
 .DS_Store
 Thumbs.db
+.vscode/

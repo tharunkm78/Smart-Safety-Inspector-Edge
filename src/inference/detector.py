@@ -1,201 +1,196 @@
-"""Core YOLOv8n detector with PyTorch and TensorRT inference.
-
-Usage:
-    python -m src.inference.detector --image tests/test.jpg
-    python -m src.inference.detector --camera 0
-"""
-
-import argparse
-import sys
-import time
+import os
+import random
+import copy
 from pathlib import Path
-from typing import Optional
+from ultralytics import YOLO
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.config import (
-    MODEL_PT,
-    MODEL_TRT,
-    SAFETY_CLASSES,
-    CLASS_TO_IDX,
-    CONFIDENCE_THRESHOLD,
-    NMS_IOU_THRESHOLD,
-    is_jetson,
-)
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import MODELS_DIR, TRAIN_CONFIG, SAFETY_CLASSES, MIN_CONF, COMBINED_DATA_DIR
 
-
-class YOLOv8nDetector:
-    """YOLOv8n safety detector with TensorRT and PyTorch backends."""
-
-    def __init__(self, model_path: Optional[Path] = None, conf_thresh: float = CONFIDENCE_THRESHOLD):
-        self.conf_thresh = conf_thresh
-
-        # Resolve model path
-        model_path = model_path or (MODEL_TRT if is_jetson() else MODEL_PT)
-
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model not found: {model_path}")
-
-        from ultralytics import YOLO
-        import torch
+class SafetyLogicEngine:
+    """Processes raw detections to derive complex safety violations."""
+    
+    @staticmethod
+    def associate_and_analyze(detections_input):
+        # Deep copy to prevent in-place modifications that cause state drift/flickering
+        detections = copy.deepcopy(detections_input)
+        persons = [d for d in detections if d["class"] == "person"]
+        ppe_items = [d for d in detections if d["class"] in ["helmet_on", "vest_on", "gloves_on", "boots"]]
+        hazards = [d for d in detections if d["class"] in ["fire", "smoke"]]
         
-        # Select device
-        if is_jetson():
-            self.device = 0
-        elif torch.cuda.is_available():
-            self.device = 0
-            print(f"SUCCESS: Using GPU ({torch.cuda.get_device_name(0)}) for inference.")
+        results = []
+        
+        # 1. Process Hazards
+        for h in hazards:
+            # Smoke and Fire are both critical in wildfire detection
+            h["priority"] = "CRITICAL"
+            results.append(h)
+
+        # 2. Process Persons and their PPE
+        for p in persons:
+            px1, py1, px2, py2 = p["bbox"]
+            p_w = px2 - px1
+            p_h = py2 - py1
+            
+            # Define refined regions
+            head_zone = (py1, py1 + 0.20 * p_h)
+            torso_zone = (py1 + 0.25 * p_h, py1 + 0.75 * p_h)
+            # Refined glove zone: broader to catch extended or raised arms
+            glove_zone_y = (py1 + 0.15 * p_h, py1 + 0.90 * p_h)
+            feet_zone = (py1 + 0.80 * p_h, py2)
+            
+            # Check for frame truncation (normalized coords 0-1)
+            # If a person is cut off at the bottom, we cannot reliably see boots.
+            # If cut off at the top, we cannot reliably see a helmet.
+            is_truncated_bottom = py2 > 0.95
+            is_truncated_top    = py1 < 0.05
+            
+            associated = {
+                "helmet": True if is_truncated_top else False,
+                "vest":   False,
+                "gloves": False,
+                "boots":  True if is_truncated_bottom else False
+            }
+            
+            # Note: We still attempt to find them if they ARE visible even in partial shots
+            for ppe in ppe_items:
+                ppx1, ppy1, ppx2, ppy2 = ppe["bbox"]
+                cx, cy = (ppx1 + ppx2) / 2, (ppy1 + ppy2) / 2
+                
+                # Check if center is inside person bbox horizontally (with 10% arm buffer)
+                if px1 - 0.10 * p_w <= cx <= px2 + 0.10 * p_w:
+                    if head_zone[0] <= cy <= head_zone[1] and ppe["class"] == "helmet_on":
+                        associated["helmet"] = True
+                    elif torso_zone[0] <= cy <= torso_zone[1] and ppe["class"] == "vest_on":
+                        associated["vest"] = True
+                    elif glove_zone_y[0] <= cy <= glove_zone_y[1] and ppe["class"] == "gloves_on":
+                        associated["gloves"] = True
+                    elif feet_zone[0] <= cy <= feet_zone[1] and ppe["class"] == "boots":
+                        associated["boots"] = True
+            
+            # Count missing items
+            missing_count = list(associated.values()).count(False)
+            
+            # Apply 3-Tier Rules
+            if not associated["helmet"] and not associated["vest"]:
+                p["priority"] = "CRITICAL"
+                p["class"] = "CRITICAL VIOLATION"
+            elif missing_count >= 3:
+                p["priority"] = "CRITICAL"
+                p["class"] = "MULTIPLE PPE FAILURE"
+            elif missing_count > 0:
+                p["priority"] = "MEDIUM"
+                p["class"] = "PPE WARNING"
+            else:
+                p["priority"] = "LOW"
+                p["class"] = "SAFE WORKER"
+                
+            # Update label with specifics
+            missing_labels = [k for k, v in associated.items() if not v]
+            if missing_labels:
+                p["class"] += f": Missing {', '.join(missing_labels)}"
+                
+            results.append(p)
+
+        # 3. Add unassociated PPE for visualization
+        for ppe in ppe_items:
+            ppe["priority"] = "LOW"
+            results.append(ppe)
+            
+        return results
+
+class YoloDetector:
+    def __init__(self, mode='test', source=0):
+        self.mode = mode
+        self.is_camera = (mode == 'camera')
+        
+        # Temporal persistence placeholder
+        self.violation_memory = {}
+        
+        model_path = MODELS_DIR / TRAIN_CONFIG["name"] / "weights" / "best.pt"
+        if model_path.exists():
+            self.model = YOLO(model_path)
         else:
-            self.device = "cpu"
-            print("WARNING: Using CPU for inference. GPU not detected or not compatible.")
+            self.model = YOLO(TRAIN_CONFIG["model"])
+            
+        self.source = source
+        self.cap = None
+        self.image_files = []
+        
+        if self.is_camera:
+            import cv2
+            print(f"Initializing Camera Source: {source}")
+            self.cap = cv2.VideoCapture(source)
+            if not self.cap.isOpened():
+                print(f"ERROR: Could not open camera {source}")
+        else:
+            # Simulation mode
+            source_path = Path(source)
+            if source_path.is_dir():
+                self.image_files = [
+                    f for f in source_path.iterdir() 
+                    if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+                ]
+                print(f"Initialized Simulation with {len(self.image_files)} images from {source_path}")
 
-        self.model = YOLO(str(model_path))
-        self.model.to(self.device)
-        self.model_path = model_path
-        self.inference_times = []
+    def get_frame_and_detections(self):
+        frame = None
+        if self.is_camera:
+            import cv2
+            if not self.cap or not self.cap.isOpened():
+                return None, []
+            success, frame = self.cap.read()
+            if not success:
+                return None, []
+        else:
+            if not self.image_files:
+                return None, []
+            import cv2
+            # Pick a random image for each call to simulate "live" testing with random samples
+            img_path = random.choice(self.image_files)
+            frame = cv2.imread(str(img_path))
+            if frame is None:
+                return None, []
 
-    def detect(self, frame, imgsz: int = 640) -> list[dict]:
-        """Run detection on a single frame.
-
-        Returns:
-            List of detections: [{"class": str, "class_id": int, "confidence": float,
-                                  "bbox": [x1, y1, x2, y2], "priority": str}, ...]
-        """
-        from src.inference.postprocess import PostProcessor
-        from src.config import ALERT_PRIORITY
-
-        t0 = time.perf_counter()
+        # Run inference with NMS tightening for small PPE objects
         results = self.model(
-            frame,
-            imgsz=imgsz,
-            conf=self.conf_thresh,
-            iou=NMS_IOU_THRESHOLD,
+            frame, 
             verbose=False,
-            device=self.device,
-        )
-        t1 = time.perf_counter()
-        self.inference_times.append(t1 - t0)
-
-        detections = []
-        if not results or not results[0].boxes:
-            return detections
-
-        boxes = results[0].boxes
-        for box in boxes:
-            cls_id = int(box.cls.item())
-            conf = float(box.conf.item())
-            xyxy = box.xyxy[0].cpu().numpy().tolist()
-
-            cls_name = SAFETY_CLASSES[cls_id] if cls_id < len(SAFETY_CLASSES) else f"class_{cls_id}"
-            priority = ALERT_PRIORITY.get(cls_name, "LOW")
-
-            detections.append({
-                "class": cls_name,
-                "class_id": cls_id,
-                "confidence": round(conf, 4),
-                "bbox": [round(x, 2) for x in xyxy],
-                "priority": priority,
+            conf=0.1,       # Lowered to allow MIN_CONF filtering (especially for smoke/fire)
+            iou=0.45,
+            augment=False,  # Disabled for stability (prevents confidence flickering)
+            imgsz=768       # Match training resolution
+        )[0]
+        
+        h, w = frame.shape[:2]
+        filtered_detections = []
+        for box in results.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            conf = float(box.conf[0])
+            cls_id = int(box.cls[0])
+            class_name = self.model.names[cls_id]
+            
+            # Confidence filtering
+            if conf < MIN_CONF.get(class_name, 0.45):
+                continue
+                
+            filtered_detections.append({
+                "class": class_name,
+                "confidence": conf,
+                "bbox": [
+                    float(x1 / w), 
+                    float(y1 / h), 
+                    float(x2 / w), 
+                    float(y2 / h)
+                ]
             })
 
-        return detections
+        # Apply Hardened Logic Engine
+        analyzed_detections = SafetyLogicEngine.associate_and_analyze(filtered_detections)
 
-    def avg_fps(self) -> float:
-        if not self.inference_times:
-            return 0.0
-        return 1.0 / (sum(self.inference_times) / len(self.inference_times))
+        return frame, analyzed_detections
 
-    def reset_timers(self):
-        self.inference_times = []
-
-
-def run_image(detector: YOLOv8nDetector, image_path: Path):
-    import cv2
-
-    img = cv2.imread(str(image_path))
-    if img is None:
-        print(f"[ERROR] Could not read image: {image_path}")
-        return
-
-    detections = detector.detect(img)
-    print(f"\nImage: {image_path}")
-    print(f"Detections ({len(detections)}):")
-    for d in detections:
-        print(f"  [{d['priority']:8s}] {d['class']:20s} {d['confidence']:.2%}  bbox={d['bbox']}")
-
-    # Draw boxes
-    for det in detections:
-        x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
-        color = {"CRITICAL": (0, 0, 255), "HIGH": (0, 165, 255), "MEDIUM": (0, 255, 255), "LOW": (0, 255, 0)}[det["priority"]]
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-        label = f"{det['class']} {det['confidence']:.0%}"
-        cv2.putText(img, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-    out_path = image_path.parent / f"{image_path.stem}_detected{image_path.suffix}"
-    cv2.imwrite(str(out_path), img)
-    print(f"Saved: {out_path}")
-
-
-def run_camera(detector: YOLOv8nDetector, camera_idx: int = 0):
-    import cv2
-    from src.inference.camera import Camera
-
-    cam = Camera(camera_idx=camera_idx)
-    cam.start()
-    print(f"\nCamera feed active. Press 'q' to quit.")
-
-    try:
-        while True:
-            frame = cam.read()
-            if frame is None:
-                continue
-
-            detections = detector.detect(frame)
-
-            # Draw on frame
-            for det in detections:
-                x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
-                color = {"CRITICAL": (0, 0, 255), "HIGH": (0, 165, 255), "MEDIUM": (0, 255, 255), "LOW": (0, 255, 0)}[det["priority"]]
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                label = f"{det['class']} {det['confidence']:.0%}"
-                cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-            fps = detector.avg_fps()
-            cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow("Safety Inspector", frame)
-
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-    finally:
-        cam.stop()
-        cv2.destroyAllWindows()
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Run YOLOv8n safety detector")
-    parser.add_argument("--image", type=Path, help="Path to test image")
-    parser.add_argument("--camera", type=int, default=None, help="Camera index to use")
-    parser.add_argument("--model", type=Path, default=None)
-    parser.add_argument("--conf", type=float, default=CONFIDENCE_THRESHOLD)
-    args = parser.parse_args()
-
-    print("=== YOLOv8n Safety Detector ===")
-    model_path = args.model or (MODEL_TRT if is_jetson() else MODEL_PT)
-    print(f"Model: {model_path}")
-    print(f"Confidence threshold: {args.conf}")
-
-    if not model_path.exists():
-        print(f"\n[ERROR] Model not found: {model_path}")
-        print("Run training first: python -m src.training.train_yolov8")
-        sys.exit(1)
-
-    detector = YOLOv8nDetector(model_path=model_path, conf_thresh=args.conf)
-
-    if args.image:
-        run_image(detector, args.image)
-    elif args.camera is not None:
-        run_camera(detector, args.camera)
-    else:
-        parser.print_help()
-
-
-if __name__ == "__main__":
-    main()
+    def release(self):
+        if self.is_camera and self.cap and self.cap.isOpened():
+            self.cap.release()

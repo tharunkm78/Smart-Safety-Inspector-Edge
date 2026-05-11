@@ -1,101 +1,66 @@
-# Smart Safety Inspector
+# 🛡️ Smart Safety Inspector: Tactical Edge HUD
+**Industrial-Grade Workplace Safety & Hazard Monitoring System**
 
-AI-powered real-time workplace safety hazard detection system for **Jetson Orin Nano** (JetPack 5.x) with Windows development fallback.
+![Dashboard Preview](https://img.shields.io/badge/UI-Tactical_HUD-red)
+![Target](https://img.shields.io/badge/Hardware-Jetson_Orin_Nano-green)
+![Logic](https://img.shields.io/badge/Safety_Logic-3--Tier_Risk-orange)
 
-## What It Does
+The **Smart Safety Inspector** is a high-performance computer vision solution designed for real-time safety compliance monitoring. Featuring a state-of-the-art "Tactical HUD" interface, the system detects PPE violations, fire hazards, and unauthorized personnel in industrial environments.
 
-Detects workplace hazards in real-time from camera feeds:
-- **PPE violations** — missing hardhat, vest, gloves, goggles, boots, etc.
-- **Construction equipment** — excavators, bulldozers, cranes, trucks
-- **Situational hazards** — fire, fall risk, vehicle proximity, spills
+---
 
-Alerts workers immediately via audio (buzzer) + visual (LED) feedback and logs all events.
+## 🚀 Core Features
+*   **Tactical Surveillance HUD**: A high-engagement, dark-mode dashboard providing real-time visual overlays and threat assessments.
+*   **3-Tier Safety Logic**:
+    *   🟢 **SAFE**: Full PPE compliance.
+    *   🟡 **WARNING**: Minor violations (e.g., missing gloves).
+    *   🔴 **CRITICAL**: Major hazards (Fire, Smoke, or Multiple PPE failures).
+*   **Boundary-Aware Intelligence**: Smart detection logic that ignores "missing boots" if a worker's feet are off-camera.
+*   **Platform Agnostic**: Optimized for both **Windows Development** (Simulation Mode) and **NVIDIA Jetson Orin Nano** (Live Production).
+*   **Zero-Latency Normalization**: Uses normalized coordinate systems to ensure perfect UI rendering across any camera resolution.
 
-## 📊 Project Preliminary Demo & Progress Update
+---
 
-The system is currently in the "Verified Development" phase. The model has been successfully trained and is running in real-time on the local dashboard.
+## 🛠️ Technical Stack
+*   **Inference**: YOLOv8 (Ultralytics)
+*   **Backend**: FastAPI / Python 3.10+
+*   **Frontend**: Vanilla JS / Canvas API (High Performance)
+*   **Streaming**: WebSocket-based telemetry & MJPEG Video Feed
+*   **Deployment**: Docker (Jetson L4T optimized)
 
-### 🧠 Model Performance (50 Epochs)
-| Metric | Result | Impact |
-|---|---|---|
-| **Precision** | **92.1%** | Extremely low false positive rate (minimal annoyance for workers). |
-| **Recall** | **76.9%** | Robust detection across 22 complex safety classes. |
-| **mAP@50** | **84.1%** | Highly accurate classification and localization. |
+---
 
-### ⚡ Inference & Speed
-- **Weights Loaded:** `yolov8n_safety_v1.pt` (Custom trained)
-- **Inference Hardware:** NVIDIA RTX 5060 Ti (Blackwell)
-- **Inference Speed:** **~2.5ms** (Over 300 FPS potential, limited to 30 FPS for camera sync)
-- **Deployment Status:** Testing on Jetson Orin Nano (TensorRT export pending)
+## 📦 Quick Start
 
-### 📈 Current Results
-Training logs, confusion matrices, and PR curves are available in the `models/train_run/` directory.
-
-## Quick Start
-
-### Windows (Development)
-
-1. **Setup**: Run `.\scripts\setup_windows.ps1`.
-2. **Datasets**: Ensure datasets are in `data/raw/` (PPE and Construction).
-3. **Balance**: `python -m src.data.balance_dataset` to prepare the unified dataset.
-4. **Train**: `python -m src.training.train_yolov8 --epochs 10` (for a quick test).
-5. **Dashboard**: `python -m src.api.main` and open `http://localhost:8000`.
-
-### Jetson Orin Nano (Production)
-
-1. **Setup**: `chmod +x scripts/setup_jetson.sh && ./scripts/setup_jetson.sh`.
-2. **Export**: `python -m src.training.export_tensorrt` to create the `.engine` file.
-3. **Run**: `./scripts/run_full_system.sh`.
-
-## Architecture
-
-```
-Camera → detector.py → alert_manager.py → audio/visual alerts
-                          ↓
-                     WebSocket → UI Dashboard
-                          ↓
-                     SQLite (alerts.db)
+### 1. Development (Simulation Mode)
+Run the inspector using the provided test dataset to verify logic and UI.
+```powershell
+python src/api/main.py --mode test
 ```
 
-The system uses **FastAPI** on all platforms for the REST API and WebSocket communication. On Windows, hardware alerts are simulated via console output and a UI overlay.
-
-## Key Commands
-
-| Command | Description |
-|---|---|
-| `python -m src.data.balance_dataset` | Balance and merge datasets |
-| `python -m src.data.dataset_stats` | Show class distribution |
-| `python -m src.training.train_yolov8` | Train YOLOv8n safety model |
-| `python -m src.training.export_tensorrt` | Export to TensorRT engine (for Jetson) |
-| `python -m src.inference.detector --camera 0` | Test camera inference |
-| `python -m src.api.main` | Start API server + Dashboard |
-| `pytest tests/` | Run unit tests |
-
-## Project Structure
-
-```
-src/
-  config.py           # Single source of truth (classes, thresholds, pins)
-  data/               # Dataset balancing and format conversion
-  training/           # YOLOv8n fine-tuning + TensorRT export
-  inference/          # Detector + camera capture + TensorRT engine
-  alerting/           # Audio/visual alerts + SQLite logger
-  api/                # FastAPI REST + WebSocket server
-ui/                   # Real-time dashboard (HTML/CSS/JS)
-models/               # Trained weights registry (.pt and .engine)
+### 2. Production (Live Camera)
+Run with a live camera feed (USB/CSI).
+```bash
+python3 src/api/main.py --mode camera --source 0
 ```
 
-## Datasets
+---
 
-The system is trained on a combined dataset of **22 safety classes** derived from:
-- **PPE Dataset**: `ppe-v2`
-- **Construction Equipment**: `construction-equipment`
+## 🐳 Docker Deployment (Jetson)
+Ensure hardware acceleration on Jetson hardware.
+```bash
+chmod +x run_jetson.sh
+./run_jetson.sh camera
+```
 
-## Hardware Mapping (Jetson)
+---
 
-| Pin | Function |
-|---|---|
-| GPIO 7 | Red LED (CRITICAL alert) |
-| GPIO 11 | Yellow LED (WARNING alert) |
-| GPIO 13 | Green LED (OK status) |
-| GPIO 15 | Buzzer trigger |
+## 📁 Repository Structure
+*   `src/api/`: FastAPI server and WebSocket logic.
+*   `src/inference/`: YOLO detection and 3-Tier Safety Logic Engine.
+*   `ui/`: Dashboard assets (HTML/CSS/JS).
+*   `Dockerfile`: Jetson-optimized production container.
+
+---
+**Developed by tharunkm78**  
+*Hardening Workplace Safety at the Edge.*
