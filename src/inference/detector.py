@@ -2,8 +2,16 @@ import os
 import random
 import copy
 from pathlib import Path
-from ultralytics import YOLO
 
+# --- JETSON HEADLESS OPENCV PATCH ---
+import cv2
+if not hasattr(cv2, 'imshow'):
+    cv2.imshow = lambda *args, **kwargs: None
+    cv2.waitKey = lambda *args, **kwargs: None
+    cv2.destroyAllWindows = lambda *args, **kwargs: None
+# ------------------------------------
+
+from ultralytics import YOLO
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MODELS_DIR, TRAIN_CONFIG, SAFETY_CLASSES, MIN_CONF, COMBINED_DATA_DIR

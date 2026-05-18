@@ -6,7 +6,10 @@
 
 // ─── Camera Configuration ──────────────────────────────────────
 const CAMERAS = [
-  { id: 'FEED-01', name: 'ENTRANCE GATE', location: 'ZONE-A' },
+  { id: 'FEED-01', name: 'ENTRANCE GATE', location: 'ZONE-A', isActive: true },
+  { id: 'FEED-02', name: 'LOADING DOCK',  location: 'ZONE-B', isActive: true },
+  { id: 'FEED-03', name: 'SCAFFOLDING',   location: 'ZONE-C', isActive: false },
+  { id: 'FEED-04', name: 'PERIMETER',     location: 'ZONE-D', isActive: false },
 ];
 
 // ─── Class Metadata ────────────────────────────────────────────

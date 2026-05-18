@@ -62,9 +62,8 @@ class CameraFeed {
     this.W          = 0;
     this.H          = 0;
 
-    // Video feed from backend
+    // Video feed will be populated by WebSocket payload
     this.videoImg = new Image();
-    this.videoImg.src = '/api/video_feed';
 
     // Animated gradient blobs — simulating a dim construction site scene
     this.blobs = [];
@@ -255,11 +254,21 @@ class CameraFeed {
 
   _loop() {
     this.t++;
-    if (this.videoImg && this.videoImg.complete && this.videoImg.naturalWidth > 0) {
+    
+    if (this.config.isActive && this.videoImg && this.videoImg.naturalWidth > 0) {
       this.ctx.drawImage(this.videoImg, 0, 0, this.W, this.H);
     } else {
       this._drawBackground();
       this._drawNoise();
+      
+      if (!this.config.isActive) {
+        // Draw NO SIGNAL / OFFLINE text
+        this.ctx.fillStyle = (this.t % 60 < 30) ? 'rgba(217, 43, 32, 0.8)' : 'rgba(217, 43, 32, 0.3)';
+        this.ctx.font = 'bold 20px "Share Tech Mono", monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('CAMERA OFFLINE', this.W / 2, this.H / 2);
+        this.ctx.textAlign = 'left';
+      }
     }
     this._drawDetections();
     this._drawScanlines();
@@ -411,6 +420,24 @@ function buildGrid(cameras) {
     card.appendChild(canvas);
     card.appendChild(hud);
     grid.appendChild(card);
+    
+    // Interactive CCTV feature: Click to maximize/restore camera feed
+    card.addEventListener('click', () => {
+      const isMaximized = card.classList.contains('maximized');
+      
+      // Reset all cards
+      document.querySelectorAll('.camera-card').forEach(c => c.classList.remove('maximized'));
+      
+      if (!isMaximized) {
+        card.classList.add('maximized');
+        grid.classList.add('has-maximized');
+      } else {
+        grid.classList.remove('has-maximized');
+      }
+      
+      // Force resize trigger to ensure canvas scaling matches the new dimensions
+      window.dispatchEvent(new Event('resize'));
+    });
 
     const feed = new CameraFeed(canvas, cam);
     feeds.push({ cam, card, canvas, feed });
@@ -467,15 +494,13 @@ function startFpsCounter() {
 
 // ─── Mock Engine ────────────────────────────────────────────────
 class MockEngine {
-  constructor(feeds, alertMgr, riskPanel, radar) {
+  constructor(feeds, alertMgr, riskPanel) {
     this.feeds      = feeds;
     this.alertMgr   = alertMgr;
     this.riskPanel  = riskPanel;
-    this.radar      = radar;
     this.idx        = 0;
     this.detCountEl = document.getElementById('headerDetections');
     this.missionEl  = document.getElementById('footerMission');
-    this.radarSigs  = document.getElementById('radarSigs');
     this._tick();
   }
 
@@ -507,14 +532,6 @@ class MockEngine {
       this.alertMgr.push(scenario, scenario.detections);
     }
 
-    // Radar blips
-    this.radar.clearBlips();
-    scenario.detections.forEach(d => {
-      const priority = (CLASS_META[d.cls] || { priority: 'LOW' }).priority;
-      this.radar.addBlip(priority);
-    });
-    this.radarSigs.textContent = `${scenario.detections.length} signatures`;
-
     setTimeout(() => this._tick(), SCENARIO_DURATION);
   }
 }
@@ -529,7 +546,6 @@ window.addEventListener('DOMContentLoaded', () => {
   // Init subsystems
   const alertMgr  = new AlertManager(document.getElementById('alertOverlay'));
   const riskPanel = new RiskPanel();
-  const radar     = new Radar(document.getElementById('radarCanvas'));
 
   // Connect to actual WebSocket backend
   const ws = new WebSocket(`ws://${window.location.host}/ws/live`);
@@ -538,18 +554,38 @@ window.addEventListener('DOMContentLoaded', () => {
   
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    if (data.type === 'detections') {
-      const detections = data.detections;
+    if (data.type === 'multi_camera') {
+      let allDetections = [];
+      let maxFps = 0;
       
-      // 1. ALWAYS update camera feeds (must be smooth/real-time for tracking)
-      feeds.forEach(({ feed, card }) => {
-        feed.updateDetections(detections, data.width, data.height);
-        card.classList.remove('active-alert-critical', 'active-alert-medium');
+      // Assume all feeds are offline until proven active by this WebSocket payload
+      feeds.forEach(f => f.feed.config.isActive = false);
+      
+      // 1. Process each camera feed
+      data.feeds.forEach(camData => {
+        // Map camera_index (0, 1) to our feeds array (FEED-01, FEED-02, etc.)
+        const feedObj = feeds[camData.camera_index];
+        if (feedObj) {
+          feedObj.feed.config.isActive = true;
+          const feed = feedObj.feed;
+          
+          if (camData.image) {
+            const newSrc = "data:image/jpeg;base64," + camData.image;
+            if (feed.videoImg.src !== newSrc) {
+              feed.videoImg.src = newSrc;
+            }
+          }
+          feed.updateDetections(camData.detections, camData.width, camData.height);
+          allDetections = allDetections.concat(camData.detections);
+          if (camData.fps > maxFps) maxFps = camData.fps;
+          
+          feedObj.card.classList.remove('active-alert-critical', 'active-alert-medium');
+        }
       });
       
-      // 2. STABILIZED UI updates for panels
+      // 2. Aggregate UI updates for panels (Risk Panel, Alerts, etc.) using all detections
       // We hash based on CLASS and PRIORITY to ignore position/confidence jitter
-      const currentHash = detections
+      const currentHash = allDetections
         .map(d => `${d.class}:${d.priority}`)
         .sort()
         .join('|');
@@ -558,28 +594,24 @@ window.addEventListener('DOMContentLoaded', () => {
       const needsUpdate = (currentHash !== lastThreatHash) || (now - lastPanelUpdate > 1000);
       
       if (needsUpdate) {
-        riskPanel.update(detections);
-        document.getElementById('headerDetections').textContent = `${detections.length} DETECTED`;
+        riskPanel.update(allDetections);
+        document.getElementById('headerDetections').textContent = `${allDetections.length} DETECTED`;
         
         // Only trigger Alert popup on meaningful CHANGES to prevent alert-spam
         if (currentHash !== lastThreatHash) {
-          const hasCritical = detections.some(d => d.priority === 'CRITICAL');
-          const hasMedium = detections.some(d => d.priority === 'MEDIUM');
+          const hasCritical = allDetections.some(d => d.priority === 'CRITICAL');
+          const hasMedium = allDetections.some(d => d.priority === 'MEDIUM');
           if (hasCritical || hasMedium) {
-            alertMgr.push({ label: 'THREAT DETECTED' }, detections);
+            alertMgr.push({ label: 'THREAT DETECTED' }, allDetections);
           }
         }
-        
-        radar.clearBlips();
-        detections.forEach(d => radar.addBlip(d.priority));
-        document.getElementById('radarSigs').textContent = `${detections.length} signatures`;
         
         lastThreatHash = currentHash;
         lastPanelUpdate = now;
       }
 
-      if (data.fps) {
-        document.getElementById('headerFps').textContent = `${Math.round(data.fps)} FPS`;
+      if (maxFps > 0) {
+        document.getElementById('headerFps').textContent = `${Math.round(maxFps)} FPS`;
       }
     }
   };

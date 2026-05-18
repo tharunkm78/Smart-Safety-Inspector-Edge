@@ -191,16 +191,25 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-r
 .feed-grid.cols-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .feed-grid.cols-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
 
-/* Camera Card */
 .camera-card {
   position: relative;
   background: #000;
   border: 1px solid var(--border);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, transform 0.2s;
 }
 .camera-card:hover { border-color: var(--amber-dim); }
+
+/* Maximized Camera State */
+.feed-grid.has-maximized .camera-card:not(.maximized) {
+  display: none;
+}
+.feed-grid.has-maximized .camera-card.maximized {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  z-index: 10;
+}
 
 .camera-card canvas {
   display: block;

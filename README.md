@@ -4,62 +4,96 @@
 ![Dashboard Preview](https://img.shields.io/badge/UI-Tactical_HUD-red)
 ![Target](https://img.shields.io/badge/Hardware-Jetson_Orin_Nano-green)
 ![Logic](https://img.shields.io/badge/Safety_Logic-3--Tier_Risk-orange)
+![Multi-Camera](https://img.shields.io/badge/Architecture-Multi--Camera_Streams-blue)
 
-The **Smart Safety Inspector** is a high-performance computer vision solution designed for real-time safety compliance monitoring. Featuring a state-of-the-art "Tactical HUD" interface, the system detects PPE violations, fire hazards, and unauthorized personnel in industrial environments.
+The **Smart Safety Inspector** is a high-performance computer vision solution designed for real-time safety compliance monitoring. Featuring a state-of-the-art "Tactical HUD" interface, the system processes multiple hardware camera streams concurrently to detect PPE violations, fire hazards, and unauthorized personnel in industrial environments.
 
 ---
 
 ## 🚀 Core Features
-*   **Tactical Surveillance HUD**: A high-engagement, dark-mode dashboard providing real-time visual overlays and threat assessments.
+*   **Tactical Surveillance HUD**: A high-engagement, dark-mode dashboard providing real-time visual overlays, interactive camera zooming, and threat assessments.
+*   **True Multi-Camera Processing**: Dynamically bounds and multiplexes multiple hardware video devices (`/dev/video*`) into unified WebSocket payloads.
 *   **3-Tier Safety Logic**:
     *   🟢 **SAFE**: Full PPE compliance.
     *   🟡 **WARNING**: Minor violations (e.g., missing gloves).
     *   🔴 **CRITICAL**: Major hazards (Fire, Smoke, or Multiple PPE failures).
 *   **Boundary-Aware Intelligence**: Smart detection logic that ignores "missing boots" if a worker's feet are off-camera.
-*   **Platform Agnostic**: Optimized for both **Windows Development** (Simulation Mode) and **NVIDIA Jetson Orin Nano** (Live Production).
-*   **Zero-Latency Normalization**: Uses normalized coordinate systems to ensure perfect UI rendering across any camera resolution.
+*   **Platform Agnostic**: Optimized for both **Windows Development** and **NVIDIA Jetson Orin Nano** (Live Production via Docker).
 
 ---
 
-## 🛠️ Technical Stack
-*   **Inference**: YOLOv8 (Ultralytics)
-*   **Backend**: FastAPI / Python 3.10+
-*   **Frontend**: Vanilla JS / Canvas API (High Performance)
-*   **Streaming**: WebSocket-based telemetry & MJPEG Video Feed
-*   **Deployment**: Docker (Jetson L4T optimized)
+## 📦 Deployment Guide: Windows (Development)
 
----
+Follow these steps to deploy and test the application on a standard Windows machine.
 
-## 📦 Quick Start
+### 1. Clone & Setup Environment
+```powershell
+# Clone the repository
+git clone https://github.com/tharunkm78/Smart-Safety-Inspector-Edge.git
+cd Smart-Safety-Inspector-Edge
 
-### 1. Development (Simulation Mode)
-Run the inspector using the provided test dataset to verify logic and UI.
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Run the Application
+The application supports two modes on Windows:
+
+**Simulation Mode:** (Runs using the internal test dataset)
 ```powershell
 python src/api/main.py --mode test
 ```
 
-### 2. Production (Live Camera)
-Run with a live camera feed (USB/CSI).
-```bash
-python3 src/api/main.py --mode camera --source 0
+**Live Camera Mode:** (Runs using your primary webcam)
+```powershell
+python src/api/main.py --mode camera --sources 0
 ```
+> **Note on Multi-Camera:** To run multiple physical webcams on Windows, pass their indices sequentially: `--sources 0,1`.
+
+**Access the Dashboard:** Open your browser and navigate to `http://localhost:8000`.
 
 ---
 
-## 🐳 Docker Deployment (Jetson)
-Ensure hardware acceleration on Jetson hardware.
+## 🐳 Deployment Guide: NVIDIA Jetson Orin Nano (Production)
+
+The Jetson deployment utilizes an L4T-optimized Docker container to grant the YOLO inference engine raw access to the NVIDIA GPU via the `nvidia` runtime, while sidestepping complex host dependency issues.
+
+### 1. Clone the Repository
 ```bash
-chmod +x run_jetson.sh
-./run_jetson.sh camera
+git clone https://github.com/tharunkm78/Smart-Safety-Inspector-Edge.git
+cd Smart-Safety-Inspector-Edge
 ```
+
+### 2. Build the Docker Container
+You only need to run this command once, or whenever the underlying Python source code is modified.
+```bash
+# Make the scripts executable
+chmod +x build_jetson.sh run_jetson.sh
+
+# Build the optimized production image
+sudo ./build_jetson.sh
+```
+
+### 3. Launch the Tactical HUD
+The launch script automatically detects connected hardware cameras (`/dev/video0`, `/dev/video1`) and mounts them into the Docker container.
+```bash
+sudo ./run_jetson.sh camera
+```
+**Access the Dashboard:** Open your browser and navigate to `http://<JETSON_IP>:8000`.
 
 ---
 
 ## 📁 Repository Structure
-*   `src/api/`: FastAPI server and WebSocket logic.
+*   `src/api/`: FastAPI server, Multi-thread orchestrator, and WebSocket logic.
 *   `src/inference/`: YOLO detection and 3-Tier Safety Logic Engine.
 *   `ui/`: Dashboard assets (HTML/CSS/JS).
-*   `Dockerfile`: Jetson-optimized production container.
+*   `build_jetson.sh`: Docker image compilation script.
+*   `run_jetson.sh`: Dynamic hardware bounding and container execution script.
+*   `Dockerfile`: Jetson-optimized production container definitions.
 
 ---
 **Developed by tharunkm78**  

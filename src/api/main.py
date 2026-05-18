@@ -15,94 +15,117 @@ from config import PROJECT_ROOT, COMBINED_DATA_DIR
 
 app = FastAPI()
 
-# Global state for sharing the latest detections between threads/tasks
-latest_detections = []
-latest_fps = 0.0
-current_width = 640
-current_height = 480
-latest_frame_id = 0
+# Global state mapping camera_index to its latest data
+global_camera_state = {}
 
 # Parse CLI Arguments
 parser = argparse.ArgumentParser(description="Smart Safety Inspector API")
 parser.add_argument("--mode", type=str, default="test", choices=["test", "camera"], help="Run mode: test or camera")
-parser.add_argument("--source", type=int, default=0, help="Camera index for camera mode")
-args = parser.parse_args()
+parser.add_argument("--sources", type=str, default="0", help="Comma-separated camera indices")
+args, unknown = parser.parse_known_args()
 
-# Initialize the detector based on mode
-if args.mode == "camera":
-    detector = YoloDetector(mode="camera", source=args.source)
-else:
-    test_images_path = COMBINED_DATA_DIR / "images" / "test"
-    detector = YoloDetector(mode="test", source=str(test_images_path))
-
-def generate_frames():
-    global latest_detections, latest_fps, current_width, current_height, latest_frame_id
+def inference_worker(camera_idx, source_val):
+    global global_camera_state
     
+    # Initialize the detector for this specific source
+    if args.mode == "camera":
+        detector = YoloDetector(mode="camera", source=int(source_val))
+    else:
+        test_images_path = COMBINED_DATA_DIR / "images" / "test"
+        detector = YoloDetector(mode="test", source=str(test_images_path))
+        
     last_update_time = 0
     last_time = time.time()
     frames_count = 0
     current_frame = None
-    current_detections = []
+    
+    # Initialize state
+    global_camera_state[camera_idx] = {
+        "detections": [],
+        "fps": 0.0,
+        "width": 640,
+        "height": 480,
+        "frame_id": 0,
+        "image": None
+    }
     
     while True:
         # Update image based on mode
         if args.mode == "test":
-            if time.time() - last_update_time >= 10 or current_frame is None:
+            # Rotate test images every 2 seconds for a slideshow effect
+            if time.time() - last_update_time >= 2 or current_frame is None:
                 current_frame, current_detections = detector.get_frame_and_detections()
                 if current_frame is not None:
-                    current_height, current_width = current_frame.shape[:2]
-                    latest_frame_id += 1
+                    h, w = current_frame.shape[:2]
+                    global_camera_state[camera_idx]["height"] = h
+                    global_camera_state[camera_idx]["width"] = w
+                    global_camera_state[camera_idx]["frame_id"] += 1
                 last_update_time = time.time()
+            else:
+                time.sleep(0.1)
+                continue
         else:
             # Real-time Camera Mode
             current_frame, current_detections = detector.get_frame_and_detections()
             if current_frame is not None:
-                current_height, current_width = current_frame.shape[:2]
-                latest_frame_id += 1
+                h, w = current_frame.shape[:2]
+                global_camera_state[camera_idx]["height"] = h
+                global_camera_state[camera_idx]["width"] = w
+                global_camera_state[camera_idx]["frame_id"] += 1
 
         if current_frame is None:
             time.sleep(0.1)
             continue
             
-        latest_detections = current_detections
+        global_camera_state[camera_idx]["detections"] = current_detections
         
         # Calculate FPS (simulated for static stream)
         frames_count += 1
         current_time = time.time()
         if current_time - last_time >= 1.0:
-            latest_fps = frames_count / (current_time - last_time)
+            global_camera_state[camera_idx]["fps"] = frames_count / (current_time - last_time)
             frames_count = 0
             last_time = current_time
 
-        # Encode frame as JPEG
+        # Encode frame as Base64 JPEG for WebSocket
         ret, buffer = cv2.imencode('.jpg', current_frame)
-        if not ret:
-            continue
-            
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        if ret:
+            import base64
+            frame_bytes = buffer.tobytes()
+            global_camera_state[camera_idx]["image"] = base64.b64encode(frame_bytes).decode('utf-8')
         
-        # Small sleep to prevent 100% CPU usage on the stream loop
+        # Small sleep to prevent 100% CPU usage
         time.sleep(0.05)
 
-@app.get("/api/video_feed")
-async def video_feed():
-    return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+@app.on_event("startup")
+def startup_event():
+    import threading
+    sources = args.sources.split(",")
+    for idx, source_val in enumerate(sources):
+        thread = threading.Thread(target=inference_worker, args=(idx, source_val), daemon=True)
+        thread.start()
 
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            # Send detections at 10Hz (100ms) to balance real-time tracking with UI stability
+            # Package all cameras into an array
+            feeds_data = []
+            for cam_idx, state in global_camera_state.items():
+                feeds_data.append({
+                    "camera_index": cam_idx,
+                    "detections": state["detections"],
+                    "fps": state["fps"],
+                    "width": state["width"],
+                    "height": state["height"],
+                    "frame_id": state["frame_id"],
+                    "image": state["image"]
+                })
+                
             data = {
-                "type": "detections",
-                "detections": latest_detections,
-                "fps": latest_fps,
-                "width": current_width,
-                "height": current_height,
-                "frame_id": latest_frame_id
+                "type": "multi_camera",
+                "feeds": feeds_data
             }
             await websocket.send_text(json.dumps(data))
             await asyncio.sleep(0.1)
