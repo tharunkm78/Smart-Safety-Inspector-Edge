@@ -5,9 +5,7 @@ __pycache__/
 venv/
 .env
 
-# AI Models (Weights are large, keep only the best production weights)
-models/
-*.pt
+# AI Models (Weights are large, tracked via Git LFS)
 *.engine
 *.torchscript
 !data/combined/models/best.pt
