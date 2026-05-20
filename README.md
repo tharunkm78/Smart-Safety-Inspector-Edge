@@ -22,6 +22,31 @@ The **Smart Safety Inspector** is a high-performance computer vision solution de
 
 ---
 
+## 📷 Interface & System Demos
+
+### 🖥️ Tactical HUD Dashboard
+A premium dark-mode dashboard showcasing live feeds, active safety violations, and real-time threat metrics:
+![Tactical HUD Dashboard](screenshots/ui.png)
+
+### 🔍 Real-Time PPE & Hazard Detections
+Unified multi-stream processing with overlay bounding boxes and confidence metrics for helmets, vests, gloves, and other safety items:
+![Camera Streams](screenshots/cam.png)
+
+### 📈 Model Evaluation & Inference Test
+Predictive tests showing accurate safety status classifications under different environmental and PPE configurations:
+![Model Evaluation](screenshots/test.png)
+
+### 🎥 Live Demonstrations
+Watch the **Smart Safety Inspector** running live at the edge, demonstrating dynamic safety transitions, alerts, and controls:
+
+#### PPE Tracking & Alerting Demo
+<video src="screenshots/Screencast%20from%2005-18-2026%20093350%20PM.mp4" width="100%" controls></video>
+
+#### HUD Safety Status Transitions & Stream Control Demo
+<video src="screenshots/Screencast%20from%2005-18-2026%20093643%20PM.mp4" width="100%" controls></video>
+
+---
+
 ## 📦 Deployment Guide: Windows (Development)
 
 Follow these steps to deploy and test the application on a standard Windows machine.
